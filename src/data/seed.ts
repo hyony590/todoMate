@@ -10,9 +10,9 @@ const toDateKey = (date: Date) => {
 export const todayKey = toDateKey(new Date())
 
 export const categories: Category[] = [
-  { id: 'routine', name: '나를 돌보기', color: '#8fae89' },
-  { id: 'work', name: '집중할 일', color: '#dd8d72' },
-  { id: 'life', name: '생활', color: '#8ca5c9' },
+  { id: 'routine', name: '나를 돌보기', color: '#3d8b67' },
+  { id: 'work', name: '집중할 일', color: '#e06445' },
+  { id: 'life', name: '생활', color: '#5276b8' },
 ]
 
 export const seedTasks: Task[] = [
