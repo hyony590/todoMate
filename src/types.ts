@@ -4,6 +4,8 @@ export type Category = {
   color: string
 }
 
+export type NewCategory = Pick<Category, 'name' | 'color'>
+
 export type Task = {
   id: string
   title: string
@@ -26,5 +28,5 @@ export type Routine = {
 
 export type NewRoutine = Pick<Routine, 'title' | 'days' | 'color'>
 
-export type ViewId = 'today' | 'calendar' | 'routines' | 'settings'
+export type ViewId = 'today' | 'calendar' | 'routines' | 'settings' | 'categories'
 export type ThemeId = 'sharp' | 'soft' | 'midnight'
