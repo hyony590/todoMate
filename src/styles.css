@@ -474,6 +474,15 @@ h1 { margin: 0; font-size: clamp(29px, 3vw, 36px); font-weight: 750; letter-spac
 .reset-dialog .form-actions { justify-content: flex-end; }
 button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .task-inspector .add-form input:focus-visible { outline: 1px solid var(--ink); outline-offset: 3px; border-bottom-color: var(--line); }
+.auth-screen { min-height: 100svh; display: grid; place-items: center; padding: 24px; background: #f5f5f3; color: #202427; }
+.auth-box { width: min(100%, 400px); }
+.auth-box h1 { font-size: 26px; letter-spacing: -1px; }
+.auth-box p { font-size: 13px; line-height: 1.7; }
+.auth-box form { display: grid; gap: 18px; margin: 28px 0 16px; }
+.auth-box label { display: grid; gap: 8px; font-size: 12px; }
+.auth-box input { width: 100%; border: 1px solid #cfd2d4; padding: 12px; background: white; border-radius: 4px; }
+.auth-box .submit-button { padding: 12px; }
+.data-error { padding: 14px; border: 1px solid var(--accent); font-size: 12px; margin-bottom: 20px; overflow-wrap: anywhere; }
 @media (max-width: 1150px) {
   .unified-shell { grid-template-columns: 168px minmax(0, 1fr) 300px; }
   .unified-shell.without-inspector { grid-template-columns: 168px minmax(0, 1fr); }

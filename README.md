@@ -20,10 +20,11 @@ npm run dev
 - 확인 절차를 거치는 로컬 데이터 초기화
 - Sharp, Soft, Midnight 테마 전환
 - 반응형 데스크톱/모바일 UI
-- 브라우저 임시 저장
+- Supabase 연결 시 이메일 로그인 및 사용자별 할 일·카테고리 저장
+- 환경변수 미설정 시 브라우저 로컬 저장
 
-## Supabase 연결 준비
+## Supabase 연결
 
-UI는 할 일과 카테고리를 각각 Repository 인터페이스로 분리해 사용합니다. 이후 로컬 구현체 대신 Supabase 구현체를 주입하면 화면 코드를 크게 바꾸지 않고 데이터베이스를 연결할 수 있습니다.
+UI는 할 일과 카테고리를 각각 Repository 인터페이스로 분리해 사용합니다. Supabase 환경변수가 설정되면 클라우드 구현체와 로그인 화면을 사용합니다. 기존 로컬 데이터는 자동 이관·삭제하지 않습니다.
 
-필요한 환경변수 이름은 `.env.example`에 준비되어 있습니다.
+필요한 환경변수 이름은 `.env.example`에 준비되어 있습니다. 실제 값은 git에서 제외되는 `.env.local`에 설정합니다. 테이블·RLS 정책은 `supabase/schema.sql`, 설정 절차는 `supabase/SETUP.md`를 참고하세요.
