@@ -4,6 +4,7 @@ export interface TaskRepository {
   list(): Promise<Task[]>
   create(task: NewTask): Promise<Task>
   toggle(id: string): Promise<Task>
+  update(id: string, title: string): Promise<Task>
   remove(id: string): Promise<void>
 }
 
@@ -46,6 +47,15 @@ export class LocalTaskRepository implements TaskRepository {
 
   async remove(id: string) {
     this.persist((await this.list()).filter((task) => task.id !== id))
+  }
+
+  async update(id: string, title: string) {
+    const tasks = await this.list()
+    const current = tasks.find(task => task.id === id)
+    if (!current) throw new Error('할 일을 찾을 수 없습니다.')
+    const changed = { ...current, title }
+    this.persist(tasks.map(task => task.id === id ? changed : task))
+    return changed
   }
 
   private persist(tasks: Task[]) {

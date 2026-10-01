@@ -1,5 +1,5 @@
 import type { Category, NewCategory } from '../types'
-import { categories as seedCategories } from './seed'
+import { categories as seedCategories, seedTasks } from './seed'
 
 export interface CategoryRepository {
   list(): Promise<Category[]>
@@ -35,6 +35,9 @@ export class LocalCategoryRepository implements CategoryRepository {
   }
 
   async remove(id: string) {
+    const saved = localStorage.getItem('haru.tasks.v1')
+    const tasks = saved ? JSON.parse(saved) as { categoryId: string }[] : seedTasks
+    localStorage.setItem('haru.tasks.v1', JSON.stringify(tasks.filter(task => task.categoryId !== id)))
     this.persist((await this.list()).filter((category) => category.id !== id))
   }
 

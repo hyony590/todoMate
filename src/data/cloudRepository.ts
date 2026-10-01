@@ -34,6 +34,11 @@ export class SupabaseTaskRepository implements TaskRepository {
     const { error } = await supabase!.from('tasks').delete().eq('id', id)
     if (error) throw error
   }
+  async update(id: string, title: string) {
+    const { data, error } = await supabase!.from('tasks').update({ title }).eq('id', id).select().single()
+    if (error) throw error
+    return taskFromRow(data)
+  }
 }
 export class SupabaseCategoryRepository implements CategoryRepository {
   async list(): Promise<Category[]> {
@@ -52,7 +57,7 @@ export class SupabaseCategoryRepository implements CategoryRepository {
     return data
   }
   async remove(id: string) {
-    const { error } = await supabase!.from('categories').delete().eq('id', id)
+    const { error } = await supabase!.rpc('delete_haru_category', { category_id_to_delete: id })
     if (error) throw error
   }
 }

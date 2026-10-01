@@ -538,8 +538,40 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .calendar-category > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .calendar-category b { flex-shrink: 0; font-size: 10px; }
 .calendar-category.all-completed { filter: brightness(.78); }
+.unified-shell { grid-template-columns: minmax(0, 42fr) minmax(0, 58fr); }
+.unified-shell .workspace { padding-left: 24px; padding-right: 24px; }
+.unified-shell .task-inspector { min-width: 0; padding-left: 28px; }
+.calendar-toolbar { gap: 12px; flex-wrap: wrap; }
+.calendar-toolbar > div > span { display: block; }
+.unified-shell .full-calendar-grid > button { height: 136px; min-height: 136px; overflow: hidden; justify-content: flex-start; }
+.calendar-overflow { color: var(--muted); font-size: 10px; text-align: left; }
+.task-text-area { flex: 1; min-width: 0; }
+button.task-title { display: block; width: 100%; border: 0; background: transparent; text-align: left; padding: 4px 0; color: inherit; cursor: text; overflow-wrap: anywhere; }
+button.task-title:disabled { opacity: 1; cursor: default; }
+.task-edit-form { display: grid; gap: 8px; width: 100%; }
+.task-edit-form input, .habit-create input, .habit-create select, .habit-date input { min-width: 0; width: 100%; padding: 10px; border: 1px solid var(--ink); border-radius: 5px; background: var(--paper); color: var(--ink); font: inherit; }
+.task-edit-form > div { display: flex; gap: 8px; }
+.task-edit-form .text-button { background: var(--hover); }
+.habits-view { max-width: 840px; }
+.habit-create { display: grid; gap: 18px; padding: 24px 0; border-bottom: 1px solid var(--line); }
+.habit-create label { display: grid; gap: 8px; font-size: 12px; }
+.weekday-picks, .habit-date { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.weekday-picks button, .habit-date button { border: 1px solid var(--line); background: var(--paper); color: var(--ink); border-radius: 5px; padding: 9px 12px; cursor: pointer; }
+.weekday-picks button[aria-pressed="true"] { background: var(--accent); color: var(--paper); border-color: var(--accent); }
+.habit-date { margin: 32px 0 24px; }
+.habit-date input { width: 165px; font-size: 13px; }
+.habits-view h2 { font-size: 22px; }
+.habit-row { display: flex; align-items: center; gap: 14px; padding: 20px 0; border-bottom: 1px solid var(--line); }
+.habit-row .check-button { --task-color: var(--accent); }
+.habit-row.completed .check-button { color: var(--paper); }
+.habit-row strong { font-weight: 500; }
+.habit-row small, .habit-library small { display: block; margin-top: 6px; color: var(--muted); font-size: 12px; }
+.habit-row.completed strong { color: var(--muted); text-decoration: line-through; }
+.habit-library { margin-top: 40px; }
+.habit-library h3 { font-size: 13px; color: var(--muted); }
+.habit-library > div { display: flex; justify-content: space-between; gap: 20px; padding: 12px 0; font-size: 13px; }
 @media (max-width: 1100px) {
-  .unified-shell { grid-template-columns: minmax(0, 1fr) 300px; }
+  .unified-shell { grid-template-columns: minmax(0, 44fr) minmax(0, 56fr); }
   .unified-shell .workspace { padding: 28px 24px 40px; }
   .unified-shell .task-inspector { padding: 116px 24px 40px 8px; }
 }
@@ -551,7 +583,7 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
   .calendar-category { padding: 3px; font-size: 8px; gap: 2px; }
   .calendar-category b { font-size: 8px; }
   .calendar-category-stack { gap: 3px; margin-top: 6px; }
-  .unified-shell .full-calendar-grid > button { min-height: 80px; padding: 7px 3px; }
+  .unified-shell .full-calendar-grid > button { height: 116px; min-height: 116px; padding: 7px 3px; }
   .category-create { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; }
   .category-create > input { grid-column: 1; width: 100%; }
   .category-color-controls { grid-column: 1; grid-row: 2; }
