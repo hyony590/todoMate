@@ -17,7 +17,8 @@ export type Task = {
 
 export type NewTask = Pick<Task, 'title' | 'date' | 'categoryId'>
 
-export type Habit = { id: string; name: string; weekdays: number[]; createdAt: string }
+export type HabitSchedule = { effectiveOn: string; weekdays: number[]; excludeHolidays?: boolean }
+export type Habit = { id: string; name: string; weekdays: number[]; createdAt: string; scheduleHistory?: HabitSchedule[]; excludeHolidays?: boolean; color?: string }
 export type HabitCompletion = { habitId: string; date: string }
-export type ViewId = 'calendar' | 'habits' | 'settings' | 'categories'
+export type ViewId = 'calendar' | 'habits' | 'projects' | 'settings' | 'categories'
 export type ThemeId = 'sharp' | 'soft' | 'midnight'

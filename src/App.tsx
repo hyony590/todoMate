@@ -1,14 +1,22 @@
-import { useEffect, useRef, useState, type FormEvent, type CSSProperties } from 'react'
-import { Home, Repeat2, ArrowLeft, CalendarDays, Check, ChevronLeft, ChevronRight, UserRound, Layers3, Moon, Palette, Pencil, Plus, Settings, Sun, Tag, Trash2 } from 'lucide-react'
+import { useEffect, useState, type FormEvent, type CSSProperties } from 'react'
+import { Home, FolderKanban, Repeat2, LogOut, ArrowLeft, CalendarDays, Check, ChevronLeft, ChevronRight, UserRound, Layers3, Moon, Palette, Pencil, Plus, Settings, Sun, Tag, Trash2 } from 'lucide-react'
 import { categories as defaults, seedTasks } from './data/seed'
 import { LocalTaskRepository } from './data/taskRepository'
 import { LocalCategoryRepository } from './data/categoryRepository'
 import type { Category, Task, ThemeId } from './types'
-import Habits from './Habits'
+import Habits, { type HabitCalendarData } from './Habits'
 import AuthGate from './AuthGate'
+import Projects from './Projects'
+import type { ProjectData } from './data/projectRepository'
+import { defaultProjectVisibility, type ProjectVisibility } from './data/projectCalendar'
+import ProjectCalendar from './ProjectCalendar'
+import PetalMark from './PetalMark'
 import { supabase } from './data/supabase'
 import { SupabaseTaskRepository, SupabaseCategoryRepository } from './data/cloudRepository'
-import { summarizeCategories, readableText } from './data/categorySummary'
+import { summarizeCategories } from './data/categorySummary'
+import { habitIsScheduled } from './data/habitSchedule'
+import { useKoreanHolidays } from './useKoreanHolidays'
+import type { HolidayMap } from './data/koreanHolidays'
 
 const taskRepository = supabase ? new SupabaseTaskRepository() : new LocalTaskRepository(seedTasks)
 const categoryRepository = supabase ? new SupabaseCategoryRepository() : new LocalCategoryRepository()
@@ -47,7 +55,8 @@ function Planner() {
     })
     setLoading(false)
   }
-  const [view, setView] = useState<'calendar' | 'habits' | 'settings' | 'categories'>('calendar')
+  const [view, setView] = useState<'calendar' | 'habits' | 'projects' | 'project-management' | 'settings' | 'categories'>('calendar')
+  const [categoryReturnView, setCategoryReturnView] = useState<typeof view>('calendar')
   const [theme, setTheme] = useState<ThemeId>(() => {
     const saved = localStorage.getItem('haru.theme')
     return themes.some(item => item.id === saved) ? saved as ThemeId : 'sharp'
@@ -56,11 +65,14 @@ function Planner() {
   const [selectedDate, setSelectedDate] = useState(dateKey(new Date()))
   const [tasks, setTasks] = useState<Task[]>([])
   const [categories, setCategories] = useState<Category[]>([])
+  const [habitCalendarData, setHabitCalendarData] = useState<HabitCalendarData>({ habits: [], completions: [] })
+  const [projectCalendarData, setProjectCalendarData] = useState<ProjectData>({ groups: [], projects: [], entries: [] })
+  const [projectVisibility, setProjectVisibility] = useState<ProjectVisibility>(defaultProjectVisibility)
   const [editingTask, setEditingTask] = useState(false)
   const [pendingCategory, setPendingCategory] = useState<string | null>(null)
   const [deletingCategory, setDeletingCategory] = useState(false)
-  function navigate(next: typeof view) { if (editingTask) { setError('수정 중인 할 일을 먼저 저장하거나 취소해주세요.'); return } setView(next); setShowProfile(false) }
-  function selectDate(key: string) { if (editingTask) { setError('수정 중인 할 일을 먼저 저장하거나 취소해주세요.'); return } setSelectedDate(key) }
+  function navigate(next: typeof view) { if (editingTask) { setError('작성 중인 내용을 먼저 저장하거나 취소해주세요.'); return } if (next === 'categories' && view !== 'categories') setCategoryReturnView(view); setView(next); setShowProfile(false) }
+  function selectDate(key: string) { if (editingTask) { setError('작성 중인 내용을 먼저 저장하거나 취소해주세요.'); return } setSelectedDate(key) }
   async function updateTask(id: string, title: string) {
     const changed = await attempt(() => taskRepository.update(id, title))
     if (!changed) throw new Error('수정 내용을 저장하지 못했습니다.')
@@ -68,7 +80,20 @@ function Planner() {
   }
   const [showReset, setShowReset] = useState(false)
   const [showProfile, setShowProfile] = useState(false)
+  const [loggingOut, setLoggingOut] = useState(false)
   const [profileEmail, setProfileEmail] = useState('')
+  async function logout() {
+    const client = supabase
+    if (!client || loggingOut) return
+    if (editingTask) { setError('작성 중인 내용을 먼저 저장하거나 취소해주세요.'); return }
+    setLoggingOut(true)
+    await attempt(async () => {
+      const { error } = await client.auth.signOut({ scope: 'local' })
+      if (error) throw error
+      setShowProfile(false)
+    })
+    setLoggingOut(false)
+  }
   useEffect(() => { if (supabase) void supabase.auth.getUser().then(({ data }) => setProfileEmail(data.user?.email ?? '')) }, [])
   useEffect(() => {
     void loadData()
@@ -130,6 +155,7 @@ function Planner() {
     // 앱 소유 키만 초기화합니다. 다른 사이트/앱의 localStorage는 건드리지 않습니다.
     localStorage.setItem('haru.tasks.v1', '[]')
     localStorage.setItem('haru.categories.v1', JSON.stringify(defaults))
+    localStorage.removeItem('haru.projects.v1')
     localStorage.removeItem('haru.routines.v1')
     localStorage.removeItem('haru.habits.v1'); localStorage.removeItem('haru.habitCompletions.v1')
     setTasks([]); setCategories(defaults); setTheme('sharp'); setWeekStart(1)
@@ -137,76 +163,87 @@ function Planner() {
     setResetting(false)
   }
   const selected = parseDate(selectedDate)
-  const title = view === 'calendar' ? '캘린더' : view === 'habits' ? '습관' : view === 'settings' ? '설정' : '카테고리'
-  return <div className={`app-shell unified-shell ${view !== 'calendar' ? 'without-inspector' : ''}`} data-theme={theme}>
+  const holidayData = useKoreanHolidays(selected.getFullYear())
+  const hasCalendar = view === 'calendar' || view === 'habits' || view === 'projects'
+  const habitCalendarTasks: Task[] = []
+  if (view === 'habits') {
+    const completed = new Set(habitCalendarData.completions.map(item => `${item.habitId}:${item.date}`))
+    const monthLength = new Date(selected.getFullYear(), selected.getMonth() + 1, 0).getDate()
+    // Calendar markers describe habit schedules, not the home page's to-dos.
+    for (let day = -6; day <= monthLength + 6; day++) {
+      const cell = new Date(selected.getFullYear(), selected.getMonth(), day)
+      const date = dateKey(cell)
+      for (const habit of habitCalendarData.habits) {
+        if (!habitIsScheduled(habit, date, holidayData.ready && date.startsWith(String(selected.getFullYear())) ? !!holidayData.holidays[date]?.length : null) && !completed.has(`${habit.id}:${date}`)) continue
+        habitCalendarTasks.push({ id: `${habit.id}:${date}`, title: habit.name, date, categoryId: habit.id, completed: completed.has(`${habit.id}:${date}`), createdAt: habit.createdAt })
+      }
+    }
+  }
+  const title = view === 'calendar' ? '오늘하루' : view === 'habits' ? '습관하루' : view === 'projects' ? '플젝하루' : view === 'project-management' ? '프로젝트 관리' : view === 'settings' ? '설정' : '카테고리'
+  return <div className={`app-shell unified-shell feed-shell ${!hasCalendar ? 'without-inspector' : ''}`} data-theme={theme}>
     <nav className="workspace-nav" aria-label="사용자 메뉴">
-      <button aria-pressed={view === 'calendar'} onClick={() => navigate('calendar')}><Home size={18} /><span>홈</span></button>
-      <button aria-pressed={view === 'habits'} onClick={() => navigate('habits')}><Repeat2 size={18} /><span>습관</span></button>
-      <button aria-label="설정 열기" aria-pressed={view === 'settings'} onClick={() => { navigate('settings') }}><Settings size={18} /><span>설정</span></button>
+      <span className="feed-brand">haru<span>나의 하루</span></span>
+      <button aria-label="오늘하루" aria-pressed={view === 'calendar'} onClick={() => navigate('calendar')}><Home size={18} /><span>오늘하루</span></button>
+      <button aria-label="습관하루" aria-pressed={view === 'habits'} onClick={() => navigate('habits')}><Repeat2 size={18} /><span>습관하루</span></button>
+      <button aria-label="플젝하루" aria-pressed={view === 'projects' || view === 'project-management'} onClick={() => navigate('projects')}><FolderKanban size={18} /><span>플젝하루</span></button>
       <button aria-label="프로필 열기" aria-expanded={showProfile} onClick={() => setShowProfile(current => !current)}><UserRound size={18} /><span>프로필</span></button>
-      {showProfile && <section className="profile-popover" aria-label="내 프로필"><strong>나의 하루</strong><p>{profileEmail || '개인 공간'}</p><button onClick={() => { navigate('calendar') }}>캘린더로</button></section>}
+      {showProfile && <section className="profile-popover" aria-label="내 프로필"><strong>나의 하루</strong><p>{profileEmail || '개인 공간'}</p><div className="profile-menu-actions"><button aria-label="설정 열기" onClick={() => navigate('settings')}><Settings size={16} />설정</button><button disabled={!supabase || loggingOut} onClick={() => void logout()}><LogOut size={16} />{loggingOut ? '로그아웃 중…' : '로그아웃'}</button></div>{!supabase && <small className="profile-local-note">로컬 미리보기에서는 로그인을 사용하지 않습니다.</small>}</section>}
     </nav>
     <main className={`workspace view-${view}`}>
-      <header className="topbar"><div><p className="eyebrow">{view === 'calendar' ? 'MONTHLY PLANNER' : 'PREFERENCES'}</p><h1>{title}</h1></div></header>
+      {hasCalendar && <div className="feed-owner"><div className="feed-avatar" aria-hidden="true"><PetalMark colors={['#25282d', '#73777c', '#c4c8cc', '#989b9e']} /></div><div><strong>{view === 'projects' ? '플젝 하루' : view === 'habits' ? '습관 하루' : profileEmail ? profileEmail.split('@')[0] : '나의 하루'}</strong><span>{view === 'projects' ? '프로젝트의 하루 기록' : '나만의 작은 기록'}</span></div><button aria-label={view === 'projects' ? '프로젝트 관리 열기' : '카테고리 관리 열기'} onClick={() => navigate(view === 'projects' ? 'project-management' : 'categories')}><Tag size={17} /></button></div>}
+      {view === 'categories' && <button className="back-button" onClick={() => navigate(categoryReturnView)}><ArrowLeft size={17} />이전으로</button>}
+      <header className="topbar"><div>{view !== 'settings' && view !== 'categories' && <p className="eyebrow">{view === 'calendar' ? 'MONTHLY PLANNER' : 'PREFERENCES'}</p>}<h1>{title}</h1></div></header>
       <div className="view-stage" key={view}>
         {loading && <p role="status">데이터 불러오는 중…</p>}
         {error && <div className="data-error" role="alert"><p>{error}</p><p>Supabase 테이블과 RLS 정책이 준비되어 있는지 확인해주세요.</p><button className="text-button" onClick={() => void loadData()}>다시 불러오기</button></div>}
-        {view === 'calendar' && <Calendar date={selected} selectedDate={selectedDate} tasks={tasks} categories={categories} weekStart={weekStart} onSelect={selectDate} />}
-        {view === 'habits' && <Habits />}
+        {hasCalendar && !holidayData.ready && !holidayData.notice && <p className="holiday-notice" role="status">공휴일 정보 확인 중…</p>}
+        {hasCalendar && holidayData.notice && <p className="holiday-notice" role="status">{holidayData.notice}<button className="text-button" onClick={holidayData.reload}>다시 확인</button></p>}
+        {view === 'projects' ? <ProjectCalendar date={selected} selectedDate={selectedDate} data={projectCalendarData} weekStart={weekStart} holidays={holidayData.holidays} onSelect={selectDate} visibility={projectVisibility} onVisibilityChange={setProjectVisibility} disabled={editingTask} /> : hasCalendar && <Calendar date={selected} selectedDate={selectedDate} tasks={view === 'habits' ? habitCalendarTasks : tasks} categories={view === 'habits' ? habitCalendarData.habits.map(habit => ({ id: habit.id, name: habit.name, color: habit.color ?? '#3d8b67' })) : categories} weekStart={weekStart} onSelect={selectDate} itemLabel={view === 'habits' ? '습관' : '할 일'} holidays={holidayData.holidays} />}
         {view === 'settings' && <section className="settings-view">
-          <button className="back-button" onClick={() => setView('calendar')}><ArrowLeft size={17} />캘린더로</button>
           <div className="settings-section-heading settings-first"><Palette size={19} /><div><h2>테마 버전</h2><p>선택한 테마는 자동으로 저장됩니다.</p></div></div>
           <div className="theme-options">{themes.map(option => { const Icon = option.icon; return <button key={option.id} className={`theme-option ${theme === option.id ? 'selected' : ''}`} onClick={() => setTheme(option.id)}><div className={`theme-preview preview-${option.id}`}><span /><span /><span /></div><div className="theme-copy"><Icon size={18} /><span><strong>{option.name}</strong><small>{option.description}</small></span></div><i>{theme === option.id && <Check size={13} />}</i></button> })}</div>
-          <div className="settings-divider" /><div className="settings-section-heading"><Tag size={19} /><div><h2>할 일 카테고리</h2><p>이름과 표시 색상을 관리합니다.</p></div></div><button className="settings-link" onClick={() => setView('categories')}><span><i>{categories.length}</i><strong>카테고리 관리</strong></span><ChevronRight size={18} /></button>
+          <div className="settings-divider" /><div className="settings-section-heading"><Tag size={19} /><div><h2>할 일 카테고리</h2><p>이름과 표시 색상을 관리합니다.</p></div></div><button className="settings-link" onClick={() => navigate('categories')}><span><i>{categories.length}</i><strong>카테고리 관리</strong></span><ChevronRight size={18} /></button>
           <div className="settings-divider" /><div className="settings-section-heading"><CalendarDays size={19} /><div><h2>캘린더 기준</h2><p>달력의 첫 번째 요일을 선택하세요.</p></div></div><div className="setting-value"><span>주 시작 요일</span><select aria-label="주 시작 요일" value={weekStart} onChange={event => setWeekStart(Number(event.target.value))}><option value={1}>월요일</option><option value={0}>일요일</option></select></div>
           <div className="settings-bottom-actions">
-            {supabase && <button className="logout-button" onClick={() => void attempt(async () => { const { error } = await supabase!.auth.signOut(); if (error) throw error })}>로그아웃</button>}
             <button className="danger-button" onClick={() => setShowReset(true)}><Trash2 size={14} />저장 데이터 삭제</button>
           </div>
         </section>}
-        {view === 'categories' && <Categories categories={categories} tasks={tasks} onBack={() => setView('settings')} onCreate={createCategory} onUpdate={updateCategory} onRemove={requestCategoryRemoval} />}
+        {view === 'categories' && <Categories categories={categories} tasks={tasks} onCreate={createCategory} onUpdate={updateCategory} onRemove={requestCategoryRemoval} />}
+        {view === 'project-management' && <Projects management selectedDate={selectedDate} holidayNames={[]} onCalendarData={setProjectCalendarData} onEditing={setEditingTask} onBack={() => navigate('projects')} />}
       </div>
     </main>
-    {view === 'calendar' && <TaskPanel date={selected} tasks={tasks.filter(task => task.date === selectedDate)} categories={categories} onAdd={addTask} onToggle={toggleTask} onRemove={removeTask} onCategories={() => navigate('categories')} onUpdate={updateTask} onEditing={setEditingTask} />}
+    {view === 'calendar' && <TaskPanel date={selected} tasks={tasks.filter(task => task.date === selectedDate)} categories={categories} onAdd={addTask} onToggle={toggleTask} onRemove={removeTask} onCategories={() => navigate('categories')} onUpdate={updateTask} onEditing={setEditingTask} holidayNames={holidayData.holidays[selectedDate] ?? []} />}
+    {view === 'habits' && <aside className="context-panel task-inspector habits-inspector"><Habits date={selectedDate} onCalendarData={setHabitCalendarData} holidays={holidayData.holidays} holidayReady={holidayData.ready} /></aside>}
+    {view === 'projects' && <aside className="context-panel task-inspector projects-inspector"><Projects visibility={projectVisibility} selectedDate={selectedDate} holidayNames={holidayData.holidays[selectedDate] ?? []} onCalendarData={setProjectCalendarData} onEditing={setEditingTask} /></aside>}
     {pendingCategory && <div className="modal-backdrop"><section className="reset-dialog" role="dialog" aria-modal="true" aria-labelledby="category-delete-title"><h2 id="category-delete-title">카테고리를 삭제할까요?</h2><p>이 카테고리에 미완료 할 일이 있습니다. 연결된 모든 할 일도 함께 삭제되며 복구할 수 없습니다.</p><div className="form-actions"><button className="text-button" disabled={deletingCategory} onClick={() => setPendingCategory(null)}>취소</button><button className="danger-button solid" disabled={deletingCategory} onClick={() => void removeCategory(pendingCategory)}>{deletingCategory ? '삭제 중…' : '삭제'}</button></div></section></div>}
-    {showReset && <div className="modal-backdrop"><section className="reset-dialog" role="dialog" aria-modal="true" aria-labelledby="reset-title"><h2 id="reset-title">저장 데이터를 삭제할까요?</h2><p>{supabase ? '현재 계정의 Supabase 할 일, 습관 기록과 카테고리를 삭제하고 기본 카테고리를 생성합니다. 모든 기기에 반영되며 복구할 수 없습니다. 기존 로컬 데이터는 유지됩니다.' : '이 브라우저의 모든 할 일, 습관과 이전 루틴 기록을 삭제하고 카테고리를 기본값으로 되돌립니다. 복구할 수 없습니다.'} 테마·캘린더 설정도 기본값으로 되돌립니다.</p><div className="form-actions"><button disabled={resetting} className="text-button" onClick={() => setShowReset(false)}>취소</button><button disabled={resetting} className="danger-button solid" onClick={() => void resetData()}>{resetting ? '초기화 중…' : '삭제하고 초기화'}</button></div></section></div>}
+    {showReset && <div className="modal-backdrop"><section className="reset-dialog" role="dialog" aria-modal="true" aria-labelledby="reset-title"><h2 id="reset-title">저장 데이터를 삭제할까요?</h2><p>{supabase ? '현재 계정의 Supabase 할 일, 습관 기록, 프로젝트와 카테고리를 삭제하고 기본 카테고리를 생성합니다. 모든 기기에 반영되며 복구할 수 없습니다. 기존 로컬 데이터는 유지됩니다.' : '이 브라우저의 모든 할 일, 습관, 프로젝트와 이전 루틴 기록을 삭제하고 카테고리를 기본값으로 되돌립니다. 복구할 수 없습니다.'} 테마·캘린더 설정도 기본값으로 되돌립니다.</p><div className="form-actions"><button disabled={resetting} className="text-button" onClick={() => setShowReset(false)}>취소</button><button disabled={resetting} className="danger-button solid" onClick={() => void resetData()}>{resetting ? '초기화 중…' : '삭제하고 초기화'}</button></div></section></div>}
   </div>
 }
 
-function Calendar({ date, selectedDate, tasks, categories, weekStart, onSelect }: { date: Date; selectedDate: string; tasks: Task[]; categories: Category[]; weekStart: number; onSelect: (key: string) => void }) {
-  const calendarRef = useRef<HTMLDivElement>(null)
-  const moveRef = useRef(onSelect); moveRef.current = onSelect
-  const monthRef = useRef(date); monthRef.current = date
-  useEffect(() => {
-    const element = calendarRef.current
-    if (!element) return
-    let total = 0, last = 0, locked = false, changedAt = 0
-    const wheel = (event: WheelEvent) => {
-      if (event.ctrlKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return
-      event.preventDefault()
-      const now = Date.now()
-      if (now - last > 240 && now - changedAt > 550) { total = 0; locked = false }
-      last = now
-      if (locked) return
-      total += event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 300 : 1)
-      if (Math.abs(total) < 60) return
-      locked = true; changedAt = now
-      const current = monthRef.current
-      moveRef.current(dateKey(new Date(current.getFullYear(), current.getMonth() + (total > 0 ? 1 : -1), 1)))
-    }
-    element.addEventListener('wheel', wheel, { passive: false })
-    return () => element.removeEventListener('wheel', wheel)
-  }, [])
+
+function Calendar({ date, selectedDate, tasks, categories, weekStart, onSelect, itemLabel = '할 일', holidays, projectMode = false }: { date: Date; selectedDate: string; tasks: Task[]; categories: Category[]; weekStart: number; onSelect: (key: string) => void; itemLabel?: string; holidays: HolidayMap; projectMode?: boolean }) {
   const first = new Date(date.getFullYear(), date.getMonth(), 1)
   const offset = (first.getDay() - weekStart + 7) % 7
   const length = Math.ceil((offset + new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate()) / 7) * 7
   const cells = Array.from({ length }, (_, index) => new Date(date.getFullYear(), date.getMonth(), 1 - offset + index))
   const weekdays = Array.from({ length: 7 }, (_, index) => dayNames[(weekStart + index) % 7])
   const today = dateKey(new Date())
-  return <section className="calendar-view"><div className="calendar-toolbar"><div><strong>{date.getFullYear()}년 {date.getMonth() + 1}월</strong><span>날짜를 선택해 할 일을 관리하세요.</span></div><div className="toolbar-actions"><button onClick={() => onSelect(today)}>오늘</button><button aria-label="이전 달" onClick={() => onSelect(dateKey(new Date(date.getFullYear(), date.getMonth() - 1, 1)))}><ChevronLeft size={18} /></button><button aria-label="다음 달" onClick={() => onSelect(dateKey(new Date(date.getFullYear(), date.getMonth() + 1, 1)))}><ChevronRight size={18} /></button></div></div><div className="full-calendar" ref={calendarRef}><div className="full-calendar-weekdays">{weekdays.map(day => <span key={day}>{day}</span>)}</div><div className="full-calendar-grid">{cells.map(cell => { const key = dateKey(cell); const items = tasks.filter(task => task.date === key); const summaries = summarizeCategories(items, categories); return <button key={key} aria-label={`${cell.getMonth() + 1}월 ${cell.getDate()}일`} className={`${cell.getMonth() !== date.getMonth() ? 'outside' : ''} ${key === selectedDate ? 'selected' : ''} ${key === today ? 'today' : ''}`} onClick={() => onSelect(key)}><span className="date-number">{cell.getDate()}</span><span className="calendar-category-stack">{summaries.slice(0, 3).map(summary => <span key={summary.id} className={`calendar-category ${summary.remaining === 0 ? 'all-completed' : ''}`} style={{ backgroundColor: summary.color, color: readableText(summary.color) }} title={`${summary.name} · ${summary.remaining ? summary.remaining + '개 미완료' : '모두 완료'}`}><span>{summary.name}</span>{summary.remaining > 0 && <b>{summary.remaining}</b>}</span>)}{summaries.length > 3 && <small className="calendar-overflow">+{summaries.length - 3}개</small>}</span></button> })}</div></div></section>
+  const monthTasks = tasks.filter(task => task.date.startsWith(dateKey(first).slice(0, 7)))
+  return <section className="calendar-view">
+    <div className="calendar-toolbar"><div><strong>{date.getFullYear()}년 {date.getMonth() + 1}월</strong>{!projectMode && <small className="month-count"><Check size={12} />{monthTasks.filter(task => task.completed).length}<span>/ {monthTasks.length}</span></small>}</div><div className="toolbar-actions"><button onClick={() => onSelect(today)}>오늘</button><button aria-label="이전 달" onClick={() => onSelect(dateKey(new Date(date.getFullYear(), date.getMonth() - 1, 1)))}><ChevronLeft size={17} /></button><button aria-label="다음 달" onClick={() => onSelect(dateKey(new Date(date.getFullYear(), date.getMonth() + 1, 1)))}><ChevronRight size={17} /></button></div></div>
+    <div className="full-calendar"><div className="full-calendar-weekdays">{weekdays.map(day => <span key={day}>{day}</span>)}</div><div className="full-calendar-grid">{cells.map(cell => {
+      const key = dateKey(cell), items = tasks.filter(task => task.date === key), summaries = summarizeCategories(items, categories)
+      const remaining = items.filter(task => !task.completed).length
+      const description = summaries.map(summary => summary.name + ' · ' + (projectMode ? summary.total + '개 todo · 일정' : summary.remaining ? summary.remaining + '개 미완료' : '모두 완료')).join(', ')
+      return <button key={key} aria-label={`${cell.getMonth() + 1}월 ${cell.getDate()}일`} aria-pressed={key === selectedDate} title={[...(holidays[key] ?? []), description || `등록된 ${itemLabel} 없음`].join(' · ')} className={`${holidays[key]?.length ? 'holiday' : ''} ${cell.getMonth() !== date.getMonth() ? 'outside' : ''} ${key === selectedDate ? 'selected' : ''} ${key === today ? 'today' : ''}`} onClick={() => onSelect(key)}>
+        <PetalMark colors={summaries.slice(0, 4).map(summary => summary.color)} completed={!!items.length && remaining === 0} count={remaining} />
+        <span className="date-number">{cell.getDate()}</span>{!!holidays[key]?.length && <i className="calendar-holiday-dot" aria-label={holidays[key].join(' · ')} />}{summaries.length > 4 && <small className="petal-overflow">+{summaries.length - 4}</small>}
+      </button>
+    })}</div></div><div className="calendar-legend"><span><i />{itemLabel}</span><span className="holiday-legend"><i />공휴일</span><span><PetalMark colors={['#c4c8cc']} completed />{projectMode ? 'todo 완료' : '완료'}</span></div>
+  </section>
 }
 
-function TaskPanel({ date, tasks, categories, onAdd, onToggle, onRemove, onCategories, onUpdate, onEditing }: { date: Date; tasks: Task[]; categories: Category[]; onAdd: (title: string, categoryId: string) => Promise<void>; onToggle: (id: string) => void; onRemove: (id: string) => Promise<void>; onCategories: () => void; onUpdate: (id: string, title: string) => Promise<void>; onEditing: (editing: boolean) => void }) {
+function TaskPanel({ date, tasks, categories, onAdd, onToggle, onRemove, onCategories, onUpdate, onEditing, holidayNames }: { date: Date; tasks: Task[]; categories: Category[]; onAdd: (title: string, categoryId: string) => Promise<void>; onToggle: (id: string) => void; onRemove: (id: string) => Promise<void>; onCategories: () => void; onUpdate: (id: string, title: string) => Promise<void>; onEditing: (editing: boolean) => void; holidayNames: string[] }) {
   const [editId, setEditId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [saving, setSaving] = useState(false)
@@ -229,11 +266,11 @@ function TaskPanel({ date, tasks, categories, onAdd, onToggle, onRemove, onCateg
   const activeCategory = categories.some(category => category.id === categoryId) ? categoryId : categories[0]?.id ?? ''
   async function submit(event: FormEvent) { event.preventDefault(); if (!title.trim() || !activeCategory || busy) return; setBusy(true); try { await onAdd(title.trim(), activeCategory); setTitle(''); setAdding(false) } catch { /* 상위 오류 안내를 표시하고 입력을 유지합니다. */ } finally { setBusy(false) } }
   const addForm = <form className="add-form" onSubmit={submit}><input autoFocus placeholder="무엇을 할까요?" value={title} onChange={event => setTitle(event.target.value)} maxLength={80} />{!quickCategory && <div className="category-picks">{categories.map(category => <button key={category.id} type="button" className={activeCategory === category.id ? 'selected' : ''} onClick={() => setCategoryId(category.id)}><span style={{ background: category.color }} />{category.name}</button>)}</div>}<div className="form-actions"><button type="button" className="text-button" onClick={() => setAdding(false)}>취소</button><button disabled={busy} className="submit-button">{busy ? '저장 중…' : '추가'}</button></div></form>
-  return <aside className="context-panel task-inspector"><h2>{date.getMonth() + 1}월 {date.getDate()}일</h2><p>{dayNames[date.getDay()]}요일</p><div className="inspector-groups">{categories.map(category => { const items = tasks.filter(task => task.categoryId === category.id); return <section className="task-group" key={category.id}><div className="group-title"><span className="color-dot" style={{ background: category.color }} /><h3>{category.name}</h3><button className="category-quick-add" aria-label={`${category.name} 할 일 추가`} onClick={() => { setCategoryId(category.id); setQuickCategory(category.id); setAdding(true) }}><Plus size={16} /></button></div>{items.map(task => <div key={task.id} className={`task-row ${task.completed ? 'completed' : ''}`}><button className="check-button" aria-label={`${task.title} ${task.completed ? '완료 취소' : '완료'}`} aria-pressed={task.completed} style={{ '--task-color': category.color } as CSSProperties} onClick={() => onToggle(task.id)}>{task.completed && <Check size={14} strokeWidth={3} />}</button><div className="task-text-area">{editId === task.id ? <form className="task-edit-form" onSubmit={saveEdit}><input autoFocus aria-label="할 일 내용 수정" value={draft} maxLength={80} onChange={event => setDraft(event.target.value)} disabled={saving} /><div><button disabled={saving || !draft.trim()} className="submit-button">저장</button><button type="button" disabled={saving} className="text-button" onClick={finishEdit}>취소</button></div></form> : <button className="task-title" disabled={!!editId} onClick={() => { setEditId(task.id); setDraft(task.title); onEditing(true) }}>{task.title}</button>}</div><button className="delete-button" aria-label={`${task.title} 삭제`} disabled={saving} onClick={() => void deleteTask(task.id)}><Trash2 size={14} /></button></div>)}{adding && quickCategory === category.id && addForm}</section> })}</div>{!tasks.length && <div className="empty-state"><strong>등록된 할 일이 없어요</strong><p>선택한 날짜에 할 일을 추가하세요.</p></div>}{!categories.length ? <button className="add-task-button" onClick={onCategories}>카테고리 먼저 만들기</button> : adding && !quickCategory ? addForm : <button className="add-task-button" onClick={() => { setQuickCategory(null); setAdding(true) }}><Plus size={18} />할 일 추가</button>}</aside>
+  return <aside className="context-panel task-inspector"><header className="feed-heading"><h1>오늘하루</h1><span>나의 할 일</span></header><div className="feed-date-heading"><h2>{date.getMonth() + 1}월 {date.getDate()}일</h2><p>{dayNames[date.getDay()]}요일</p>{!!holidayNames.length && <span className="holiday-badge">{holidayNames.join(' · ')}</span>}</div><div className="inspector-groups">{categories.map(category => { const items = tasks.filter(task => task.categoryId === category.id); return <section className="task-group" key={category.id}><div className="group-title" style={{ '--category-color': category.color } as CSSProperties}><Tag size={13} /><h3>{category.name}</h3><button className="category-quick-add" aria-label={`${category.name} 할 일 추가`} onClick={() => { setCategoryId(category.id); setQuickCategory(category.id); setAdding(true) }}><Plus size={16} /></button></div>{items.map(task => <div key={task.id} className={`task-row ${task.completed ? 'completed' : ''}`}><button className="check-button" aria-label={`${task.title} ${task.completed ? '완료 취소' : '완료'}`} aria-pressed={task.completed} style={{ '--task-color': category.color } as CSSProperties} onClick={() => onToggle(task.id)}><PetalMark colors={task.completed ? [category.color] : []} completed={task.completed} /></button><div className="task-text-area">{editId === task.id ? <form className="task-edit-form" onSubmit={saveEdit}><input autoFocus aria-label="할 일 내용 수정" value={draft} maxLength={80} onChange={event => setDraft(event.target.value)} disabled={saving} /><div><button disabled={saving || !draft.trim()} className="submit-button">저장</button><button type="button" disabled={saving} className="text-button" onClick={finishEdit}>취소</button></div></form> : <button className="task-title" disabled={!!editId} onClick={() => { setEditId(task.id); setDraft(task.title); onEditing(true) }}>{task.title}</button>}</div><button className="delete-button" aria-label={`${task.title} 삭제`} disabled={saving} onClick={() => void deleteTask(task.id)}><Trash2 size={14} /></button></div>)}{adding && quickCategory === category.id && addForm}</section> })}</div>{!tasks.length && <div className="empty-state"><strong>등록된 할 일이 없어요</strong><p>선택한 날짜에 할 일을 추가하세요.</p></div>}{!categories.length ? <button className="add-task-button" onClick={onCategories}>카테고리 먼저 만들기</button> : adding && !quickCategory ? addForm : <button className="add-task-button" onClick={() => { setQuickCategory(null); setAdding(true) }}><Plus size={18} />할 일 추가</button>}</aside>
 }
 
-function Categories({ categories, tasks, onBack, onCreate, onUpdate, onRemove }: { categories: Category[]; tasks: Task[]; onBack: () => void; onCreate: (name: string, color: string) => Promise<void>; onUpdate: (id: string, name: string, color: string) => Promise<void>; onRemove: (id: string) => void }) {
+function Categories({ categories, tasks, onCreate, onUpdate, onRemove }: { categories: Category[]; tasks: Task[]; onCreate: (name: string, color: string) => Promise<void>; onUpdate: (id: string, name: string, color: string) => Promise<void>; onRemove: (id: string) => void }) {
   const [name, setName] = useState(''); const [color, setColor] = useState(colors[0]); const [editing, setEditing] = useState<string | null>(null)
   async function submit(event: FormEvent) { event.preventDefault(); if (!name.trim()) return; try { if (editing) await onUpdate(editing, name.trim(), color); else await onCreate(name.trim(), color); setName(''); setEditing(null) } catch { /* 저장 실패 시 입력을 유지합니다. */ } }
-  return <section className="categories-view"><button className="back-button" onClick={onBack}><ArrowLeft size={17} />설정으로</button><div className="category-intro"><p>카테고리 이름과 색상은 캘린더와 할 일 목록에 바로 반영됩니다.</p><span>{categories.length}개 사용 중</span></div><form className="category-create" onSubmit={submit}><input aria-label="카테고리 이름" placeholder={editing ? '카테고리 이름 수정' : '새 카테고리 이름'} value={name} onChange={event => setName(event.target.value)} maxLength={30} /><div className="category-color-controls"><div className="category-color-picks">{colors.map(item => <button type="button" key={item} aria-label={`${item} 선택`} className={color === item ? 'selected' : ''} style={{ background: item }} onClick={() => setColor(item)} />)}</div><label className="custom-color-picker" title="직접 색상 선택"><input type="color" aria-label="사용자 지정 색상" value={color} onChange={event => setColor(event.target.value)} /><span>직접 선택</span></label></div><div className="category-form-actions"><button className="submit-button">{editing ? '저장' : '추가'}</button><button type="button" className="text-button" onClick={() => { setEditing(null); setName(''); setColor(colors[0]) }}>취소</button></div></form><div className="category-manager-list">{categories.map(category => { const categoryTasks = tasks.filter(task => task.categoryId === category.id); const remaining = categoryTasks.filter(task => !task.completed).length; return <div className="category-manager-row" key={category.id}><span className="category-swatch" style={{ background: category.color }} /><div><strong>{category.name}</strong>{remaining > 0 && <small>{remaining}개 미완료 남음</small>}</div><div className="category-row-actions"><button aria-label={`${category.name} 수정`} onClick={() => { setEditing(category.id); setName(category.name); setColor(category.color) }}><Pencil size={15} /></button><button aria-label={`${category.name} 삭제`} title="연결된 할 일과 함께 삭제" onClick={() => onRemove(category.id)}><Trash2 size={15} /></button></div></div> })}</div></section>
+  return <section className="categories-view"><div className="category-intro"><p>카테고리 이름과 색상은 캘린더와 할 일 목록에 바로 반영됩니다.</p><span>{categories.length}개 사용 중</span></div><form className="category-create" onSubmit={submit}><input aria-label="카테고리 이름" placeholder={editing ? '카테고리 이름 수정' : '새 카테고리 이름'} value={name} onChange={event => setName(event.target.value)} maxLength={30} /><div className="category-color-controls"><div className="category-color-picks">{colors.map(item => <button type="button" key={item} aria-label={`${item} 선택`} className={color === item ? 'selected' : ''} style={{ background: item }} onClick={() => setColor(item)} />)}</div><label className="custom-color-picker" title="직접 색상 선택"><input type="color" aria-label="사용자 지정 색상" value={color} onChange={event => setColor(event.target.value)} /><span>직접 선택</span></label></div><div className="category-form-actions"><button className="submit-button">{editing ? '저장' : '추가'}</button><button type="button" className="text-button" onClick={() => { setEditing(null); setName(''); setColor(colors[0]) }}>취소</button></div></form><div className="category-manager-list">{categories.map(category => { const categoryTasks = tasks.filter(task => task.categoryId === category.id); const remaining = categoryTasks.filter(task => !task.completed).length; return <div className="category-manager-row" key={category.id}><span className="category-swatch" style={{ background: category.color }} /><div><strong>{category.name}</strong>{remaining > 0 && <small>{remaining}개 미완료 남음</small>}</div><div className="category-row-actions"><button aria-label={`${category.name} 수정`} onClick={() => { setEditing(category.id); setName(category.name); setColor(category.color) }}><Pencil size={15} /></button><button aria-label={`${category.name} 삭제`} title="연결된 할 일과 함께 삭제" onClick={() => onRemove(category.id)}><Trash2 size={15} /></button></div></div> })}</div></section>
 }
